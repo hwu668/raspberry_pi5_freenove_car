@@ -4,7 +4,7 @@ motor_control.py - 电机 / 舵机 / 超声波 / LED / 蜂鸣器 综合控制模
 适用: 树莓派5 + Freenove FNK0043B Smart Car Board (PCA9685 I2C 驱动)
 
 功能:
-  - 4 路麦克纳姆轮电机控制 (前进/后退/左转/右转/横移/斜移)
+  - 4 路直流电机控制 (前进/后退/左转/右转/差速转向)
   - 2 路舵机云台控制 (水平/垂直)
   - HC-SR04 超声波测距
   - 8 颗 WS2812B RGB LED
@@ -78,16 +78,6 @@ class MotorControl:
     LEFT = "left"
     RIGHT = "right"
     STOP = "stop"
-
-    # 麦克纳姆轮特有方向
-    STRAFE_LEFT = "strafe_left"    # 左横移
-    STRAFE_RIGHT = "strafe_right"  # 右横移
-    DIAGONAL_FL = "diag_fl"        # 左前斜移
-    DIAGONAL_FR = "diag_fr"        # 右前斜移
-    DIAGONAL_BL = "diag_bl"        # 左后斜移
-    DIAGONAL_BR = "diag_br"        # 右后斜移
-    ROTATE_LEFT = "rotate_left"    # 原地左旋
-    ROTATE_RIGHT = "rotate_right"  # 原地右旋
 
     def __init__(self, config):
         self.config = config
@@ -173,7 +163,7 @@ class MotorControl:
         logger.info("硬件资源已释放")
 
     # ========================================================================
-    # 高级运动指令
+    # 运动指令 (普通车轮: 前进/后退/差速转向)
     # ========================================================================
 
     def move_forward(self, duty: int = None):
@@ -193,44 +183,28 @@ class MotorControl:
         logger.debug("后退: duty=%d", d)
 
     def turn_left(self, duty: int = None):
-        """原地左旋 (四轮差速: 左轮后转, 右轮前转)"""
+        """原地左转 (四轮差速: 左轮后转, 右轮前转)"""
         d = duty if duty is not None else self.duty_turn
         d = max(0, min(self.duty_max, d))
         self._set_motor_raw(-d, -d, d, d)
         self._current_command = self.LEFT
-        logger.debug("左旋: duty=%d", d)
+        logger.debug("左转: duty=%d", d)
 
     def turn_right(self, duty: int = None):
-        """原地右旋 (四轮差速: 左轮前转, 右轮后转)"""
+        """原地右转 (四轮差速: 左轮前转, 右轮后转)"""
         d = duty if duty is not None else self.duty_turn
         d = max(0, min(self.duty_max, d))
         self._set_motor_raw(d, d, -d, -d)
         self._current_command = self.RIGHT
-        logger.debug("右旋: duty=%d", d)
-
-    def strafe_left(self, duty: int = None):
-        """麦克纳姆轮左横移 (左前+右后反转, 右前+左后正转)"""
-        d = duty if duty is not None else self.duty_base
-        d = max(0, min(self.duty_max, d))
-        self._set_motor_raw(-d, d, d, -d)
-        self._current_command = self.STRAFE_LEFT
-        logger.debug("左横移: duty=%d", d)
-
-    def strafe_right(self, duty: int = None):
-        """麦克纳姆轮右横移 (左前+右后正转, 右前+左后反转)"""
-        d = duty if duty is not None else self.duty_base
-        d = max(0, min(self.duty_max, d))
-        self._set_motor_raw(d, -d, -d, d)
-        self._current_command = self.STRAFE_RIGHT
-        logger.debug("右横移: duty=%d", d)
+        logger.debug("右转: duty=%d", d)
 
     def steer(self, direction: str, inner_duty: int, outer_duty: int):
-        """差速转向 (比原地旋转更平滑)。
+        """差速转向 (比原地旋转更平滑, 前进中微调方向)。
 
         Args:
             direction: 'left' 或 'right'
-            inner_duty: 内侧轮速度
-            outer_duty: 外侧轮速度
+            inner_duty: 内侧轮速度 (较慢)
+            outer_duty: 外侧轮速度 (较快)
         """
         inner_duty = max(0, min(self.duty_max, inner_duty))
         outer_duty = max(0, min(self.duty_max, outer_duty))
@@ -243,44 +217,6 @@ class MotorControl:
             self._set_motor_raw(outer_duty, outer_duty, inner_duty, inner_duty)
         self._current_command = direction
         logger.debug("差速转向 %s: inner=%d outer=%d", direction, inner_duty, outer_duty)
-
-    def set_velocity(self, vx: float, vy: float, omega: float, max_duty: int = None):
-        """麦克纳姆轮速度分解 (全向移动)。
-
-        Args:
-            vx: X 轴速度分量 (-1.0 ~ 1.0)
-            vy: Y 轴速度分量 (-1.0 ~ 1.0, 正=前进)
-            omega: 旋转角速度 (-1.0 ~ 1.0, 正=右旋)
-            max_duty: 最大 duty 值上限
-        """
-        if max_duty is None:
-            max_duty = self.duty_base
-
-        # 麦克纳姆轮运动学逆解:
-        #  LF =  vy - vx - omega
-        #  LR =  vy + vx - omega
-        #  RF = -vy - vx - omega
-        #  RR = -vy + vx - omega
-        #
-        # 注意: 具体符号可能因电机安装方向而异, 首次运行需验证
-
-        lf = vy - vx - omega
-        lr = vy + vx - omega
-        rf = -vy - vx - omega
-        rr = -vy + vx - omega
-
-        # 归一化
-        max_val = max(abs(lf), abs(lr), abs(rf), abs(rr), 1.0)
-        scale = max_duty / max_val
-        duty_lf = int(lf * scale)
-        duty_lr = int(lr * scale)
-        duty_rf = int(rf * scale)
-        duty_rr = int(rr * scale)
-
-        self._set_motor_raw(duty_lf, duty_lr, duty_rf, duty_rr)
-        self._current_command = "omni"
-        logger.debug("全向移动: vx=%.2f vy=%.2f omega=%.2f → [%d,%d,%d,%d]",
-                     vx, vy, omega, duty_lf, duty_lr, duty_rf, duty_rr)
 
     def stop(self):
         """停车 (四轮停转)"""

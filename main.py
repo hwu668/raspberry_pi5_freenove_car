@@ -1,5 +1,5 @@
 """
-main.py - 树莓派5 + Freenove FNK0043B 视觉导航主程序
+main.py - 树莓派5 + Freenove FNK0043B (普通车轮版) 视觉导航主程序
 
 功能流程:
   1. 初始化摄像头、图像识别、电机控制、导航模块
@@ -60,7 +60,7 @@ class CarController:
         self._apply_color_preset(target_color)
 
         logger.info("=" * 55)
-        logger.info("Freenove FNK0043B - 4WD 麦克纳姆轮视觉导航系统")
+        logger.info("Freenove FNK0043B - 4WD 普通车轮 视觉导航系统")
         logger.info("=" * 55)
 
         self.camera = Camera(config)
@@ -207,10 +207,6 @@ class CarController:
             self.motor.turn_right()
         elif key == ord('x'):
             self.motor.move_backward()
-        elif key == ord('z'):
-            self.motor.strafe_left()
-        elif key == ord('c'):
-            self.motor.strafe_right()
         elif key == ord('m'):
             self.motor.led_indicator("SEARCH")
             self.motor.buzzer_beep(50)
@@ -238,7 +234,7 @@ class CarController:
         lines = [
             f"State: {nav_state:10s}  Command: {self.motor.current_command:12s}",
             f"FPS: {self._fps_current:5.1f}   Duty: {self.motor.duty_base}",
-            "[Q]uit [R]eset [S]top [F]wd [WASD] Move [ZX] Strafe",
+            "[Q]uit [R]eset [S]top [F]wd [WASD] Move",
         ]
         for i, line in enumerate(lines):
             cv2.putText(frame, line, (10, h - 48 + i * 18),
@@ -255,7 +251,7 @@ class CarController:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Freenove FNK0043B 4WD 麦克纳姆轮 视觉导航系统",
+        description="Freenove FNK0043B 4WD 普通车轮 视觉导航系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:

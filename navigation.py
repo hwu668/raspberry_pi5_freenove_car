@@ -1,12 +1,12 @@
 """
 navigation.py - 导航与路径规划模块
 
-适用: Freenove FNK0043B (4WD 麦克纳姆轮)
+适用: Freenove FNK0043B (4WD 普通车轮)
 
 功能:
   1. 接收图像识别结果 (TargetInfo), 计算运动指令
   2. PID 控制器 - 平滑转向, 避免震荡
-  3. 麦克纳姆轮运动学 - 支持横移、斜移等全向移动
+  3. 差速转向 - 两侧车轮速度差实现前进中转向
   4. 状态机 - SEARCH / TRACK / APPROACH / STOP 四种状态
   5. 距离管理 - 超声波测距 + 目标面积估算
 """
@@ -73,7 +73,7 @@ class PIDController:
 
 
 class Navigation:
-    """FNK0043B 导航引擎: 视觉引导 + 麦克纳姆轮全向移动"""
+    """FNK0043B 导航引擎: 视觉引导 + 差速转向"""
 
     def __init__(self, config, motor_control):
         """

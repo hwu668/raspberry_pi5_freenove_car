@@ -1,4 +1,4 @@
-# Freenove FNK0043B - 4WD 麦克纳姆轮 视觉导航系统
+# Freenove FNK0043B - 4WD 普通车轮 视觉导航系统
 # Python 依赖清单
 #
 # 前提: 需要先安装 Freenove 官方库

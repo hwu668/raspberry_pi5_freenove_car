@@ -1,7 +1,7 @@
 """
 raspberry_pi5_freenove_car 项目配置文件
 
-适用: 树莓派5 + Freenove FNK0043B (4WD 麦克纳姆轮智能小车)
+适用: 树莓派5 + Freenove FNK0043B (4WD 普通车轮智能小车)
        Smart Car Board (PCB V1.0 / V2.0)
 
 所有参数集中管理，修改配置后无需改动业务代码。
@@ -11,7 +11,7 @@ raspberry_pi5_freenove_car 项目配置文件
 # 品牌 / 型号
 # ============================================================================
 PRODUCT_NAME = "Freenove FNK0043B"
-PRODUCT_DESC = "4WD Mecanum Wheel Smart Car Kit for Raspberry Pi 5"
+PRODUCT_DESC = "4WD Standard Wheel Smart Car Kit for Raspberry Pi 5"
 
 # ============================================================================
 # I2C / SPI 总线配置
