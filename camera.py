@@ -8,10 +8,11 @@ camera.py - 摄像头管理模块
 统一接口，上层模块无需关心底层实现。
 """
 
-import cv2
-import numpy as np
 import logging
 import time
+
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

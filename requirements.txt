@@ -1,26 +1,5 @@
 # Freenove FNK0043B - 4WD 普通车轮 视觉导航系统
-# Python 依赖清单
-#
-# 前提: 需要先安装 Freenove 官方库
-#      从 https://freenove.com/tutorial 下载 FNK0043 完整代码包
-#      解压后运行 setup.py 安装 Freenove 依赖
+# 跨平台 Python 依赖 (PC / Raspberry Pi 通用)
 
-# ---- 核心依赖 ----
 opencv-python>=4.8.0
 numpy>=1.24.0
-
-# ---- 摄像头 ----
-# 树莓派5 CSI 摄像头
-picamera2>=0.3.17
-
-# ---- Freenove 官方库依赖 (由 Freenove setup.py 自动安装) ----
-# smbus2       - I2C 通信 (PCA9685 / ADS7830)
-# spidev       - SPI 通信 (WS2812B LED)
-# RPi.GPIO     - GPIO (超声波 / 蜂鸣器 / 红外)
-#
-# 安装 Freenove 官方依赖:
-#   cd ~/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/
-#   python3 setup.py
-
-# ---- 可选: TensorFlow Lite (DNN 目标检测) ----
-# tflite-runtime>=2.14.0

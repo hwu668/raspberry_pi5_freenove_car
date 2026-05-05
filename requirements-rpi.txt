@@ -1,0 +1,20 @@
+# Freenove FNK0043B - Raspberry Pi 专属依赖
+# 仅在树莓派上安装, 普通 PC 开发环境不需要
+#
+# 安装:
+#   pip install -r requirements-rpi.txt
+
+# CSI 摄像头
+picamera2>=0.3.17
+
+# Freenove 官方库依赖 (由 Freenove setup.py 自动安装):
+#   smbus2       - I2C 通信 (PCA9685 / ADS7830)
+#   spidev       - SPI 通信 (WS2812B LED)
+#   RPi.GPIO     - GPIO (超声波 / 蜂鸣器 / 红外)
+#
+# 安装 Freenove 官方依赖:
+#   cd ~/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/
+#   python3 setup.py
+
+# 可选: TensorFlow Lite (DNN 目标检测)
+# tflite-runtime>=2.14.0

@@ -8,11 +8,12 @@ image_recognition.py - 图像识别与目标检测模块
 检测结果统一封装为 TargetInfo。
 """
 
-import cv2
-import numpy as np
 import logging
 from dataclasses import dataclass
 from typing import Optional
+
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
