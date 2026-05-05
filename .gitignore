@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs (keep directory, ignore log files)
+logs/*.log
+logs/*.txt
+
+# Model files (usually large, add manually when needed)
+models/*.pb
+models/*.pbtxt
+models/*.tflite
+models/*.h5
+models/*.onnx
+
+# Raspberry Pi specific
+*.pyc
