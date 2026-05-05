@@ -10,13 +10,17 @@ motor_control.py - 电机 / 舵机 / 超声波 / LED / 蜂鸣器 综合控制模
   - 8 颗 WS2812B RGB LED
   - 有源蜂鸣器
 
+运行模式:
+  - auto:     优先使用硬件，初始化失败时降级为 Mock
+  - mock:     强制 Mock 模式，不依赖真实硬件
+  - hardware: 强制硬件模式，缺少硬件库或初始化失败时直接报错
+
 依赖: Freenove 官方库 (Motor.py, servo.py, Led.py, Buzzer.py, Ultrasonic.py, PCA9685.py)
-      未安装时自动回退 Mock 模式 (适合开发调试)
+      未安装时按模式决定是否回退 Mock。
 """
 
 import logging
 import time
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -27,41 +31,41 @@ logger = logging.getLogger(__name__)
 # --- 电机 ---
 try:
     from Motor import Motor as _FreenoveMotor
+
     _HAS_MOTOR = True
 except ImportError:
-    logger.warning("Freenove Motor 库未安装, 电机控制进入 Mock 模式")
     _HAS_MOTOR = False
 
 # --- 舵机 ---
 try:
     from servo import Servo as _FreenoveServo
+
     _HAS_SERVO = True
 except ImportError:
-    logger.warning("Freenove servo 库未安装, 舵机进入 Mock 模式")
     _HAS_SERVO = False
 
 # --- LED ---
 try:
     from Led import Led as _FreenoveLed
+
     _HAS_LED = True
 except ImportError:
-    logger.warning("Freenove Led 库未安装, LED 进入 Mock 模式")
     _HAS_LED = False
 
 # --- 蜂鸣器 ---
 try:
     from Buzzer import Buzzer as _FreenoveBuzzer
+
     _HAS_BUZZER = True
 except ImportError:
-    logger.warning("Freenove Buzzer 库未安装, 蜂鸣器进入 Mock 模式")
     _HAS_BUZZER = False
 
 # --- 超声波 ---
 try:
     from Ultrasonic import Ultrasonic as _FreenoveUltrasonic
+
     _HAS_ULTRASONIC = True
 except ImportError:
-    logger.warning("Freenove Ultrasonic 库未安装, 超声波进入 Mock 模式")
     _HAS_ULTRASONIC = False
 
 
@@ -69,8 +73,13 @@ class MotorControl:
     """Freenove FNK0043B 小车综合控制
 
     封装 Freenove 官方库, 提供一致的 API。
-    未安装官方库时自动进入 Mock 模式 (所有操作日志记录但不执行硬件动作)。
+    根据运行模式决定是否使用真实硬件或 Mock。
     """
+
+    # 运行模式常量
+    MODE_AUTO = "auto"
+    MODE_MOCK = "mock"
+    MODE_HARDWARE = "hardware"
 
     # 移动方向常量
     FORWARD = "forward"
@@ -79,8 +88,14 @@ class MotorControl:
     RIGHT = "right"
     STOP = "stop"
 
-    def __init__(self, config):
+    def __init__(self, config, mode: str = "auto"):
         self.config = config
+        self._mode = mode
+
+        # 运行状态字段
+        self.hardware_available = False
+        self.mock_active = False
+        self.initialization_errors: list[str] = []
 
         # 电机速度参数
         self.duty_base = config.MOTOR_DUTY_BASE
@@ -89,7 +104,7 @@ class MotorControl:
         self.duty_max = config.MOTOR_DUTY_MAX
         self.duty_min = config.MOTOR_DUTY_MIN
 
-        # 初始化 Freenove 实例 (或 Mock)
+        # 硬件实例 (初始化前为 None)
         self._motor = None
         self._servo = None
         self._led = None
@@ -104,49 +119,120 @@ class MotorControl:
     # ========================================================================
 
     def setup(self) -> bool:
-        """初始化所有硬件模块。返回 True 表示至少 Mock 可用。"""
-        logger.info("正在初始化 Freenove FNK0043B 硬件模块...")
+        """初始化所有硬件模块。
+
+        根据 self.mode 决定初始化策略:
+          - mock:     跳过所有硬件初始化, 直接进入 Mock 模式
+          - auto:     尝试初始化硬件, 失败则降级 Mock
+          - hardware: 尝试初始化硬件, 失败则报错返回 False
+
+        Returns:
+            bool: True 表示初始化成功 (Mock 或硬件均可), False 表示失败
+        """
+        logger.info("正在初始化 Freenove FNK0043B 硬件模块... (mode=%s)", self._mode)
+
+        # --- Mock 模式: 跳过硬件 ---
+        if self._mode == self.MODE_MOCK:
+            logger.info("Mock mode active - 跳过硬件初始化")
+            self.mock_active = True
+            self.hardware_available = False
+            self._initialized = True
+            self.stop()
+            return True
+
+        # --- Auto / Hardware 模式: 尝试初始化硬件 ---
+        any_hardware_ok = False
+        self.initialization_errors = []
+
+        # 检查是否有任何硬件库可用
+        if not any([_HAS_MOTOR, _HAS_SERVO, _HAS_LED, _HAS_BUZZER, _HAS_ULTRASONIC]):
+            msg = "未检测到任何 Freenove 硬件库 (Motor/servo/Led/Buzzer/Ultrasonic)"
+            logger.error(msg)
+            self.initialization_errors.append(msg)
+            if self._mode == self.MODE_HARDWARE:
+                self._initialized = False
+                return False
+            # Auto 模式降级
+            logger.info("Auto 模式降级为 Mock: %s", msg)
+            self.mock_active = True
+            self.hardware_available = False
+            self._initialized = True
+            self.stop()
+            return True
 
         # 电机 (PCA9685)
         if _HAS_MOTOR:
             try:
                 self._motor = _FreenoveMotor()
                 logger.info("  ✓ 电机模块 (PCA9685)")
+                any_hardware_ok = True
             except Exception as e:
-                logger.error("  ✗ 电机初始化失败: %s", e)
+                err = f"电机初始化失败: {e}"
+                logger.error("  ✗ %s", err)
+                self.initialization_errors.append(err)
 
         # 舵机
         if _HAS_SERVO:
             try:
                 self._servo = _FreenoveServo()
                 logger.info("  ✓ 舵机模块")
+                any_hardware_ok = True
             except Exception as e:
-                logger.error("  ✗ 舵机初始化失败: %s", e)
+                err = f"舵机初始化失败: {e}"
+                logger.error("  ✗ %s", err)
+                self.initialization_errors.append(err)
 
         # LED
         if _HAS_LED:
             try:
                 self._led = _FreenoveLed()
                 logger.info("  ✓ LED 模块")
+                any_hardware_ok = True
             except Exception as e:
-                logger.error("  ✗ LED 初始化失败: %s", e)
+                err = f"LED 初始化失败: {e}"
+                logger.error("  ✗ %s", err)
+                self.initialization_errors.append(err)
 
         # 蜂鸣器
         if _HAS_BUZZER:
             try:
                 self._buzzer = _FreenoveBuzzer()
                 logger.info("  ✓ 蜂鸣器模块")
+                any_hardware_ok = True
             except Exception as e:
-                logger.error("  ✗ 蜂鸣器初始化失败: %s", e)
+                err = f"蜂鸣器初始化失败: {e}"
+                logger.error("  ✗ %s", err)
+                self.initialization_errors.append(err)
 
         # 超声波
         if _HAS_ULTRASONIC:
             try:
                 self._ultrasonic = _FreenoveUltrasonic()
                 logger.info("  ✓ 超声波模块")
+                any_hardware_ok = True
             except Exception as e:
-                logger.error("  ✗ 超声波初始化失败: %s", e)
+                err = f"超声波初始化失败: {e}"
+                logger.error("  ✗ %s", err)
+                self.initialization_errors.append(err)
 
+        if any_hardware_ok:
+            self.hardware_available = True
+            self.mock_active = False
+            self._initialized = True
+            self.stop()
+            logger.info("硬件初始化完成 (hardware mode)")
+            return True
+
+        # 硬件库存在但全部初始化失败
+        if self._mode == self.MODE_HARDWARE:
+            logger.error("Hardware 模式: 所有硬件模块初始化失败, 退出")
+            self._initialized = False
+            return False
+
+        # Auto 模式降级
+        logger.warning("Auto 模式降级为 Mock: 硬件初始化全部失败")
+        self.mock_active = True
+        self.hardware_available = False
         self._initialized = True
         self.stop()
         return True
@@ -159,8 +245,9 @@ class MotorControl:
                 self._motor.close()
             except Exception:
                 pass
+        if not self.mock_active:
+            logger.info("硬件资源已释放")
         self._initialized = False
-        logger.info("硬件资源已释放")
 
     # ========================================================================
     # 运动指令 (普通车轮: 前进/后退/差速转向)
@@ -262,7 +349,6 @@ class MotorControl:
         """
         angle = max(self.config.SERVO_PAN_MIN_ANGLE,
                     min(self.config.SERVO_PAN_MAX_ANGLE, angle))
-        # 角度 → Freenove PWM 值
         pwm_val = self._angle_to_pwm(angle, self.config.SERVO0_PWM_MIN,
                                      self.config.SERVO0_PWM_MAX)
         if self._servo is not None:
@@ -297,9 +383,6 @@ class MotorControl:
     @staticmethod
     def _angle_to_pwm(angle: float, pwm_min: int, pwm_max: int) -> float:
         """将角度 (0~180) 转换为 Freenove 舵机 PWM 值"""
-        # 注意: Freenove setServoPwm 的参数范围因舵机而异
-        #   Servo 0: 50 (~0°) ~ 110 (~180°)
-        #   Servo 1: 80 (~0°) ~ 150 (~180°)
         return pwm_min + (angle / 180.0) * (pwm_max - pwm_min)
 
     # ========================================================================
@@ -334,7 +417,7 @@ class MotorControl:
         """
         if not 0 <= index <= 7:
             return
-        bitmask = 1 << index  # 0x01, 0x02, 0x04, ...
+        bitmask = 1 << index
         if self._led is not None:
             try:
                 self._led.ledIndex(bitmask, r, g, b)
@@ -354,13 +437,13 @@ class MotorControl:
         """根据导航状态显示不同 LED 颜色。
 
         Args:
-            state: 'search' / 'track' / 'approach' / 'stop'
+            state: 'SEARCH' / 'TRACK' / 'APPROACH' / 'STOP'
         """
         colors = {
-            "SEARCH":   (0, 0, 255),    # 蓝色: 搜索
-            "TRACK":    (255, 255, 0),  # 黄色: 追踪
-            "APPROACH": (0, 255, 0),    # 绿色: 接近
-            "STOP":     (255, 0, 0),    # 红色: 停止
+            "SEARCH": (0, 0, 255),
+            "TRACK": (255, 255, 0),
+            "APPROACH": (0, 255, 0),
+            "STOP": (255, 0, 0),
         }
         r, g, b = colors.get(state, (0, 0, 0))
         for i in range(8):
@@ -395,6 +478,10 @@ class MotorControl:
     # ========================================================================
     # 属性
     # ========================================================================
+
+    @property
+    def mode(self) -> str:
+        return self._mode
 
     @property
     def is_initialized(self) -> bool:

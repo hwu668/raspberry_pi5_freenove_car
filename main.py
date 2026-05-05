@@ -12,15 +12,18 @@ main.py - 树莓派5 + Freenove FNK0043B (普通车轮版) 视觉导航主程序
   python main.py --color blue        # 追踪蓝色目标
   python main.py --no-display        # 无头模式 (不显示 GUI, 可 SSH 运行)
   python main.py --duty 1500         # 自定义基础速度 (duty 值)
+  python main.py --mode mock         # 强制 Mock 模式 (普通 PC 调试)
+  python main.py --mode hardware     # 强制硬件模式 (缺少硬件时报错退出)
 """
 
-import cv2
+import argparse
+import logging
+import signal
 import sys
 import time
-import signal
-import logging
-import argparse
 from pathlib import Path
+
+import cv2
 
 # 确保日志目录存在
 Path("logs").mkdir(parents=True, exist_ok=True)
@@ -36,19 +39,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-import config
-from camera import Camera
-from image_recognition import ImageRecognition
-from motor_control import MotorControl
-from navigation import Navigation, NavState
+import config  # noqa: E402 (logging configured above)
+from camera import Camera  # noqa: E402
+from image_recognition import ImageRecognition  # noqa: E402
+from motor_control import MotorControl  # noqa: E402
+from navigation import Navigation  # noqa: E402
 
 
 class CarController:
     """FNK0043B 视觉导航总控制器"""
 
     def __init__(self, no_display: bool = False, target_color: str = "red",
-                 base_duty: int = None):
+                 base_duty: int = None, mode: str = "auto",
+                 max_frames: int = None):
         self.no_display = no_display
+        self._mode = mode
+        self._max_frames = max_frames
 
         if no_display:
             config.ENABLE_DISPLAY = False
@@ -61,11 +67,12 @@ class CarController:
 
         logger.info("=" * 55)
         logger.info("Freenove FNK0043B - 4WD 普通车轮 视觉导航系统")
+        logger.info("运行模式: %s", mode)
         logger.info("=" * 55)
 
         self.camera = Camera(config)
         self.recognition = ImageRecognition(config)
-        self.motor = MotorControl(config)
+        self.motor = MotorControl(config, mode=mode)
         self.navigation = Navigation(config, self.motor)
 
         self._running = False
@@ -103,14 +110,20 @@ class CarController:
             logger.error("摄像头初始化失败, 退出")
             sys.exit(1)
 
-        self.motor.setup()
+        if not self.motor.setup():
+            logger.error("电机控制初始化失败 (mode=%s), 退出", self._mode)
+            sys.exit(1)
+
         self.motor.center_servos()
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
         self._running = True
-        logger.info("主循环启动 (按 Ctrl+C 或 'q' 退出)...")
+        if self.motor.mock_active:
+            logger.info("主循环启动 (Mock 模式, 按 Ctrl+C 或 'q' 退出)...")
+        else:
+            logger.info("主循环启动 (硬件模式, 按 Ctrl+C 或 'q' 退出)...")
 
         try:
             self._main_loop()
@@ -126,11 +139,21 @@ class CarController:
         logger.info("正在关闭系统...")
         self._running = False
 
-        self.motor.stop()
-        self.motor.clear_leds()
+        try:
+            self.motor.stop()
+            self.motor.clear_leds()
+        except Exception as e:
+            logger.exception("停止电机时出错: %s", e)
 
-        self.camera.release()
-        self.motor.cleanup()
+        try:
+            self.camera.release()
+        except Exception as e:
+            logger.exception("释放摄像头时出错: %s", e)
+
+        try:
+            self.motor.cleanup()
+        except Exception as e:
+            logger.exception("清理硬件资源时出错: %s", e)
 
         if config.ENABLE_DISPLAY:
             cv2.destroyAllWindows()
@@ -142,6 +165,7 @@ class CarController:
     # ========================================================================
 
     def _main_loop(self):
+        frame_count = 0
         while self._running:
             loop_start = time.time()
 
@@ -180,6 +204,12 @@ class CarController:
             sleep_time = config.MAIN_LOOP_DELAY - loop_time
             if sleep_time > 0:
                 time.sleep(sleep_time)
+
+            # 7. 帧数限制
+            frame_count += 1
+            if self._max_frames is not None and frame_count >= self._max_frames:
+                logger.info("已达到最大帧数限制 (%d), 自动退出", self._max_frames)
+                self._running = False
 
     # ========================================================================
     # 键盘控制
@@ -231,8 +261,10 @@ class CarController:
         cv2.rectangle(overlay, (0, h - 65), (w, h), (20, 20, 20), -1)
         frame[:] = cv2.addWeighted(frame, 0.75, overlay, 0.25, 0)
 
+        mode_str = "MOCK" if self.motor.mock_active else "HW"
         lines = [
-            f"State: {nav_state:10s}  Command: {self.motor.current_command:12s}",
+            f"State: {nav_state:10s}  Cmd: {self.motor.current_command:12s}  "
+            f"Mode: {mode_str}",
             f"FPS: {self._fps_current:5.1f}   Duty: {self.motor.duty_base}",
             "[Q]uit [R]eset [S]top [F]wd [WASD] Move",
         ]
@@ -255,10 +287,12 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python main.py                          # 追踪红色目标
-  python main.py --color blue              # 追踪蓝色目标
-  python main.py --no-display              # 无头模式 (SSH)
-  python main.py --duty 1500 --color green # 低速追踪绿色
+  python main.py                              # 追踪红色目标
+  python main.py --color blue                 # 追踪蓝色目标
+  python main.py --no-display                 # 无头模式 (SSH)
+  python main.py --duty 1500 --color green    # 低速追踪绿色
+  python main.py --mode mock --no-display     # 强制 Mock (PC 调试)
+  python main.py --mode hardware --duty 1200  # 强制硬件模式
         """,
     )
     parser.add_argument("--no-display", action="store_true",
@@ -267,13 +301,38 @@ def parse_args():
                         choices=list(config.COLOR_PRESETS.keys()),
                         help="追踪的目标颜色 (默认: red)")
     parser.add_argument("--duty", type=int, default=None,
-                        help=f"电机基础 duty 值 0-{config.MOTOR_DUTY_MAX} (默认: {config.MOTOR_DUTY_BASE})")
+                        help=f"电机基础 duty 值 0-{config.MOTOR_DUTY_MAX} "
+                             f"(默认: {config.MOTOR_DUTY_BASE})")
+    parser.add_argument("--mode", type=str, default="auto",
+                        choices=["auto", "mock", "hardware"],
+                        help="运行模式: auto(默认,自动降级) | mock(强制Mock) | "
+                             "hardware(强制硬件,缺库时报错)")
+    parser.add_argument("--log-level", type=str, default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="日志级别 (默认: INFO)")
+    parser.add_argument("--max-frames", type=int, default=None,
+                        help="处理 N 帧后自动退出 (用于 CI / smoke test)")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # Apply log level
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    # Validate duty range
+    if args.duty is not None:
+        if not 0 <= args.duty <= config.MOTOR_DUTY_MAX:
+            logger.error(
+                "非法 duty 值: %d (有效范围: 0-%d)",
+                args.duty, config.MOTOR_DUTY_MAX,
+            )
+            sys.exit(1)
+
     controller = CarController(no_display=args.no_display,
                                target_color=args.color,
-                               base_duty=args.duty)
+                               base_duty=args.duty,
+                               mode=args.mode,
+                               max_frames=args.max_frames)
     controller.start()
