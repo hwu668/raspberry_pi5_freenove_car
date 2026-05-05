@@ -31,10 +31,14 @@ raspberry_pi5_freenove_car/
 ├── image_recognition.py  # 图像识别 (HSV 颜色追踪 / DNN)
 ├── motor_control.py      # 电机 + 舵机 + LED + 超声波 + 蜂鸣器
 ├── navigation.py         # 导航引擎 (PID + 状态机 + 差速转向)
-├── requirements.txt      # Python 依赖
+├── requirements.txt      # 跨平台 Python 依赖
+├── requirements-rpi.txt  # Raspberry Pi 专属依赖
+├── requirements-dev.txt  # 开发依赖 (pytest, ruff)
+├── pyproject.toml        # Ruff 配置
 ├── README.md
 ├── models/               # DNN 模型文件 (可选)
-└── logs/                 # 运行日志
+├── logs/                 # 运行日志
+└── tests/                # 单元测试
 ```
 
 **数据流**:
@@ -66,9 +70,18 @@ sudo raspi-config
 
 ### 2. 本项目依赖
 
+**普通 PC (开发 / Mock 调试)**:
 ```bash
 cd raspberry_pi5_freenove_car
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+**树莓派 (实车运行)**:
+```bash
+cd raspberry_pi5_freenove_car
+pip install -r requirements.txt
+pip install -r requirements-rpi.txt
 ```
 
 ### 3. 摄像头 (Pi5)
@@ -87,6 +100,25 @@ camera_auto_detect=1
 - **PID 参数**: `PID_KP/KI/KD`
 - **停车距离**: `STOP_DISTANCE_CM` (默认 10cm)
 
+## 运行模式
+
+本项目支持三种运行模式：
+
+- `--mode auto` (默认): 优先尝试真实硬件，硬件库不可用或初始化失败时自动降级为 Mock。
+- `--mode mock`: 强制 Mock 模式，用于普通 PC 调试，不依赖真实小车硬件。
+- `--mode hardware`: 强制硬件模式。缺少关键硬件库或初始化失败时直接退出，不降级 Mock。
+
+```bash
+# Mock 模式 (普通 PC 调试)
+python main.py --mode mock --no-display
+
+# Auto 模式 (默认, 自动降级)
+python main.py --mode auto --color red --no-display
+
+# 强制硬件模式 (缺少硬件时报错)
+python main.py --mode hardware --color red --duty 1200
+```
+
 ## 运行
 
 ```bash
@@ -98,7 +130,7 @@ python main.py --color blue
 python main.py --color green
 python main.py --color yellow
 
-# 自定义速度 (更慢/更稳)
+# 自定义速度 (更慢/更稳, 建议首次实车测试使用 800~1200)
 python main.py --duty 1200
 
 # 无头模式 (SSH, 不显示 GUI)
@@ -145,6 +177,13 @@ FNK0043B 普通车轮版采用差速转向:
 - `turn_left/right`: 原地转向 (两侧反向)
 - `steer(direction, inner, outer)`: 差速转向 (前进中微调, 内侧轮慢外侧轮快)
 
+## 功能状态说明
+
+当前默认稳定功能是 **HSV 颜色追踪**。DNN 目标检测属于可选扩展功能：
+
+- HSV 颜色追踪: 开箱即用，支持 red / blue / green / yellow 四种颜色预置。
+- DNN 目标检测: 需要用户自行准备模型文件 (`.pbtxt` / `.pb`)，并在 `config.py` 中配置 `DNN_MODEL_PATH`、`DNN_WEIGHTS_PATH` 和 `TARGET_CLASS_IDS`。clone 仓库后默认不保证 DNN 可以直接运行。
+
 ## 自定义目标
 
 ### 颜色追踪
@@ -162,6 +201,37 @@ DNN_WEIGHTS_PATH = "models/your_weights.pb"
 TARGET_CLASS_IDS = [1]  # COCO 类别
 ```
 
+## 已验证环境
+
+| 项目 | 版本 / 状态 |
+|---|---|
+| Raspberry Pi | Raspberry Pi 5 |
+| OS | TODO |
+| Python | TODO |
+| Camera | TODO |
+| Freenove Kit | FNK0043B |
+| Freenove library | TODO |
+| I2C | Enabled |
+| SPI | Enabled |
+
+## 实车验证清单
+
+- [ ] 摄像头可以打开
+- [ ] HSV 红色目标识别正常
+- [ ] HSV 蓝色目标识别正常
+- [ ] HSV 绿色目标识别正常
+- [ ] HSV 黄色目标识别正常
+- [ ] 小车可前进
+- [ ] 小车可后退
+- [ ] 小车可左转
+- [ ] 小车可右转
+- [ ] 超声波距离读数正常
+- [ ] 低于停车距离后自动 STOP
+- [ ] LED 状态显示正常
+- [ ] 蜂鸣器正常
+- [ ] SSH 无头模式可运行
+- [ ] Ctrl+C 后小车停止并清理资源
+
 ## 故障排查
 
 | 问题 | 可能原因 | 解决 |
@@ -176,6 +246,30 @@ TARGET_CLASS_IDS = [1]  # COCO 类别
 ## 开发
 
 非树莓派环境开发调试: 项目所有模块均有 Mock 降级机制 — 未检测到 Freenove 库 / GPIO 时自动进入日志模式, 可在 PC 上运行和调试图像识别逻辑。
+
+## 开发检查 (Development Checks)
+
+在普通 PC 或 Raspberry Pi 上运行本地检查：
+
+```bash
+# 语法检查
+python -m py_compile main.py camera.py config.py image_recognition.py motor_control.py navigation.py
+
+# Lint 检查
+ruff check .
+
+# 代码格式化
+ruff format .
+
+# 单元测试
+pytest
+```
+
+## More documentation
+
+- [HSV calibration](docs/calibration.md)
+- [Hardware checklist](docs/hardware-checklist.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ## License
 
